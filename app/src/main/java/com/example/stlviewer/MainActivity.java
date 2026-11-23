@@ -26,7 +26,7 @@ public class MainActivity extends Activity {
   @Override public void onCreate(Bundle b) {
     super.onCreate(b);
     LinearLayout root=new LinearLayout(this);root.setOrientation(1);root.setBackgroundColor(0xff101926);
-    TextView title=new TextView(this);title.setText("STL VIEWER");title.setTextSize(23);title.setTextColor(0xff82e7d2);title.setPadding(20,22,10,8);root.addView(title);
+    TextView title=new TextView(this);title.setText("STL VIEWER 2");title.setTextSize(23);title.setTextColor(0xff82e7d2);title.setPadding(20,22,10,8);root.addView(title);
     details=new TextView(this);details.setText("Open an STL file to view a 3D model");details.setTextColor(Color.WHITE);details.setPadding(20,4,10,16);root.addView(details);
     renderer=new Viewer();
     view=new GLSurfaceView(this);view.setEGLContextClientVersion(2);view.setRenderer(renderer);view.setRenderMode(GLSurfaceView.RENDERMODE_WHEN_DIRTY);
@@ -67,6 +67,7 @@ public class MainActivity extends Activity {
 
   static class Mesh {
     FloatBuffer triangles;
+    FloatBuffer normals;
     int count;
     static Mesh read(InputStream stream)throws Exception {
       ByteArrayOutputStream out=new ByteArrayOutputStream();byte[] buf=new byte[32768];int n;
@@ -92,13 +93,28 @@ public class MainActivity extends Activity {
       for(int i=0;i<coords.length;i++){float f=coords[i];if(!Float.isFinite(f))throw new IOException("Invalid vertex");int k=i%3;min[k]=Math.min(min[k],f);max[k]=Math.max(max[k],f);}
       float extent=Math.max(max[0]-min[0],Math.max(max[1]-min[1],max[2]-min[2])); if(extent<=0)extent=1;
       for(int i=0;i<coords.length;i++)coords[i]=(coords[i]-(min[i%3]+max[i%3])*0.5f)*2f/extent;
+      // STL is a triangle soup. Calculate one normal per face, repeated at each vertex,
+      // so flat CAD surfaces stay distinct rather than being smoothed together.
+      float[] normals=new float[coords.length];
+      for(int i=0;i<coords.length;i+=9){
+        float ux=coords[i+3]-coords[i],uy=coords[i+4]-coords[i+1],uz=coords[i+5]-coords[i+2];
+        float vx=coords[i+6]-coords[i],vy=coords[i+7]-coords[i+1],vz=coords[i+8]-coords[i+2];
+        float nx=uy*vz-uz*vy,ny=uz*vx-ux*vz,nz=ux*vy-uy*vx;
+        float len=(float)Math.sqrt(nx*nx+ny*ny+nz*nz);
+        if(len>1e-15f){nx/=len;ny/=len;nz/=len;}else{nx=0;ny=0;nz=1;}
+        for(int k=0;k<9;k+=3){normals[i+k]=nx;normals[i+k+1]=ny;normals[i+k+2]=nz;}
+      }
       Mesh m=new Mesh();m.count=coords.length/9;
-      ByteBuffer direct=ByteBuffer.allocateDirect(coords.length*4).order(ByteOrder.nativeOrder());m.triangles=direct.asFloatBuffer();m.triangles.put(coords);m.triangles.position(0);return m;
+      ByteBuffer direct=ByteBuffer.allocateDirect(coords.length*4).order(ByteOrder.nativeOrder());
+      m.triangles=direct.asFloatBuffer();m.triangles.put(coords);m.triangles.position(0);
+      ByteBuffer ndirect=ByteBuffer.allocateDirect(normals.length*4).order(ByteOrder.nativeOrder());
+      m.normals=ndirect.asFloatBuffer();m.normals.put(normals);m.normals.position(0);
+      return m;
     }
   }
 
   static class Viewer implements GLSurfaceView.Renderer {
-    Mesh mesh;int program,position,color,mvpLoc;
+    Mesh mesh;int program,position,normal,mvpLoc,mvLoc;
     float ax=-25,ay=30,zoom=3.6f,aspect=1;
     float[] proj=new float[16],mv=new float[16],mvp=new float[16];
     void setMesh(Mesh m){mesh=m;reset();}
@@ -109,19 +125,47 @@ public class MainActivity extends Activity {
     @Override public void onSurfaceCreated(javax.microedition.khronos.opengles.GL10 gl,javax.microedition.khronos.egl.EGLConfig cfg){
       GLES20.glClearColor(.055f,.09f,.145f,1);
       GLES20.glEnable(GLES20.GL_DEPTH_TEST);
-      int vs=shader(GLES20.GL_VERTEX_SHADER,"uniform mat4 uMVP; attribute vec3 aPosition; void main(){gl_Position=uMVP*vec4(aPosition,1.0);}");
-      int fs=shader(GLES20.GL_FRAGMENT_SHADER,"precision mediump float; uniform vec4 uColor; void main(){gl_FragColor=uColor;}");
+      String vertex="uniform mat4 uMVP; uniform mat4 uMV; attribute vec3 aPosition; attribute vec3 aNormal;"+
+        "varying vec3 vNormal; varying vec3 vEye;"+
+        "void main(){vec4 eye=uMV*vec4(aPosition,1.0);vEye=eye.xyz;vNormal=(uMV*vec4(aNormal,0.0)).xyz;gl_Position=uMVP*vec4(aPosition,1.0);}";
+      String fragment="precision mediump float; varying vec3 vNormal; varying vec3 vEye;"+
+        "void main(){"+
+        "vec3 N=normalize(vNormal);if(!gl_FrontFacing)N=-N;"+
+        "vec3 light=normalize(vec3(-0.45,0.75,0.85));"+
+        "vec3 fill=normalize(vec3(0.7,-0.4,0.25));"+
+        "float diffuse=max(dot(N,light),0.0);"+
+        "float bounce=max(dot(N,fill),0.0);"+
+        "float brightness=0.25+0.64*diffuse+0.16*bounce;"+
+        "vec3 eye=normalize(-vEye);vec3 halfDir=normalize(light+eye);"+
+        "float spec=pow(max(dot(N,halfDir),0.0),30.0)*0.22;"+
+        "vec3 base=vec3(0.67,0.75,0.83);"+
+        "vec3 result=base*brightness+vec3(spec);"+
+        "gl_FragColor=vec4(result,1.0);}";
+      int vs=shader(GLES20.GL_VERTEX_SHADER,vertex);
+      int fs=shader(GLES20.GL_FRAGMENT_SHADER,fragment);
       program=GLES20.glCreateProgram();GLES20.glAttachShader(program,vs);GLES20.glAttachShader(program,fs);GLES20.glLinkProgram(program);
-      position=GLES20.glGetAttribLocation(program,"aPosition");color=GLES20.glGetUniformLocation(program,"uColor");mvpLoc=GLES20.glGetUniformLocation(program,"uMVP");
+      position=GLES20.glGetAttribLocation(program,"aPosition");
+      normal=GLES20.glGetAttribLocation(program,"aNormal");
+      mvpLoc=GLES20.glGetUniformLocation(program,"uMVP");
+      mvLoc=GLES20.glGetUniformLocation(program,"uMV");
     }
     @Override public void onSurfaceChanged(javax.microedition.khronos.opengles.GL10 gl,int w,int h){GLES20.glViewport(0,0,w,h);aspect=(float)w/Math.max(1,h);}
     @Override public void onDrawFrame(javax.microedition.khronos.opengles.GL10 gl){
       GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT|GLES20.GL_DEPTH_BUFFER_BIT);if(mesh==null||program==0)return;
       Matrix.perspectiveM(proj,0,45,aspect,.1f,100);Matrix.setIdentityM(mv,0);
       Matrix.translateM(mv,0,0,0,-zoom);Matrix.rotateM(mv,0,ax,1,0,0);Matrix.rotateM(mv,0,ay,0,1,0);Matrix.multiplyMM(mvp,0,proj,0,mv,0);
-      GLES20.glUseProgram(program);GLES20.glUniformMatrix4fv(mvpLoc,1,false,mvp,0);GLES20.glUniform4f(color,.31f,.84f,.78f,1f);
-      GLES20.glEnableVertexAttribArray(position);mesh.triangles.position(0);GLES20.glVertexAttribPointer(position,3,GLES20.GL_FLOAT,false,0,mesh.triangles);
-      GLES20.glDrawArrays(GLES20.GL_TRIANGLES,0,mesh.count*3);GLES20.glDisableVertexAttribArray(position);
+      GLES20.glUseProgram(program);
+      GLES20.glUniformMatrix4fv(mvpLoc,1,false,mvp,0);
+      GLES20.glUniformMatrix4fv(mvLoc,1,false,mv,0);
+      GLES20.glEnableVertexAttribArray(position);
+      mesh.triangles.position(0);
+      GLES20.glVertexAttribPointer(position,3,GLES20.GL_FLOAT,false,0,mesh.triangles);
+      GLES20.glEnableVertexAttribArray(normal);
+      mesh.normals.position(0);
+      GLES20.glVertexAttribPointer(normal,3,GLES20.GL_FLOAT,false,0,mesh.normals);
+      GLES20.glDrawArrays(GLES20.GL_TRIANGLES,0,mesh.count*3);
+      GLES20.glDisableVertexAttribArray(normal);
+      GLES20.glDisableVertexAttribArray(position);
     }
   }
 }
