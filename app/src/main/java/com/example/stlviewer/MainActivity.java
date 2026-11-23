@@ -26,7 +26,7 @@ public class MainActivity extends Activity {
   @Override public void onCreate(Bundle b) {
     super.onCreate(b);
     LinearLayout root=new LinearLayout(this);root.setOrientation(1);root.setBackgroundColor(0xff101926);
-    TextView title=new TextView(this);title.setText("STL VIEWER 2");title.setTextSize(23);title.setTextColor(0xff82e7d2);title.setPadding(20,22,10,8);root.addView(title);
+    TextView title=new TextView(this);title.setText("STL VIEWER 3");title.setTextSize(23);title.setTextColor(0xff82e7d2);title.setPadding(20,22,10,8);root.addView(title);
     details=new TextView(this);details.setText("Open an STL file to view a 3D model");details.setTextColor(Color.WHITE);details.setPadding(20,4,10,16);root.addView(details);
     renderer=new Viewer();
     view=new GLSurfaceView(this);view.setEGLContextClientVersion(2);view.setRenderer(renderer);view.setRenderMode(GLSurfaceView.RENDERMODE_WHEN_DIRTY);
@@ -58,7 +58,13 @@ public class MainActivity extends Activity {
         if(in==null)throw new IOException("Cannot open file");
         Mesh m=Mesh.read(in);
         view.queueEvent(()->renderer.setMesh(m));view.requestRender();
-        runOnUiThread(()->details.setText(uri.getLastPathSegment()+" • "+m.count+" triangles"));
+        runOnUiThread(()->{
+          double cm3=m.volumeMm3/1000.0;
+          double meters=m.volumeMm3/(Math.PI*0.875*0.875)/1000.0;
+          details.setText(String.format(java.util.Locale.US,
+            "%s  •  %,d triangles\nSize: %.2f × %.2f × %.2f mm\nSolid volume: %.3f cm³  |  1.75 mm filament: %.2f m\nAssumes STL units are mm; closed watertight mesh; 100%% solid",
+            uri.getLastPathSegment(),m.count,m.width,m.height,m.depth,cm3,meters));
+        });
       }catch(Exception ex){runOnUiThread(()->details.setText("Error: "+ex.getMessage()));}
     }).start();
   }
@@ -69,6 +75,8 @@ public class MainActivity extends Activity {
     FloatBuffer triangles;
     FloatBuffer normals;
     int count;
+    float width,height,depth;
+    double volumeMm3;
     static Mesh read(InputStream stream)throws Exception {
       ByteArrayOutputStream out=new ByteArrayOutputStream();byte[] buf=new byte[32768];int n;
       while((n=stream.read(buf))!=-1){out.write(buf,0,n);if(out.size()>100000000)throw new IOException("File too large (100 MB max)");}
@@ -92,6 +100,15 @@ public class MainActivity extends Activity {
       float[] max={Float.NEGATIVE_INFINITY,Float.NEGATIVE_INFINITY,Float.NEGATIVE_INFINITY};
       for(int i=0;i<coords.length;i++){float f=coords[i];if(!Float.isFinite(f))throw new IOException("Invalid vertex");int k=i%3;min[k]=Math.min(min[k],f);max[k]=Math.max(max[k],f);}
       float extent=Math.max(max[0]-min[0],Math.max(max[1]-min[1],max[2]-min[2])); if(extent<=0)extent=1;
+      // Signed tetrahedral sum: valid enclosed volume for consistently oriented watertight STL surfaces.
+      // Coordinates must be evaluated before normalization.
+      double signedVolume=0;
+      for(int i=0;i<coords.length;i+=9){
+        double ax=coords[i],ay=coords[i+1],az=coords[i+2];
+        double bx=coords[i+3],by=coords[i+4],bz=coords[i+5];
+        double cx=coords[i+6],cy=coords[i+7],cz=coords[i+8];
+        signedVolume+=ax*(by*cz-bz*cy)-ay*(bx*cz-bz*cx)+az*(bx*cy-by*cx);
+      }
       for(int i=0;i<coords.length;i++)coords[i]=(coords[i]-(min[i%3]+max[i%3])*0.5f)*2f/extent;
       // STL is a triangle soup. Calculate one normal per face, repeated at each vertex,
       // so flat CAD surfaces stay distinct rather than being smoothed together.
@@ -105,6 +122,8 @@ public class MainActivity extends Activity {
         for(int k=0;k<9;k+=3){normals[i+k]=nx;normals[i+k+1]=ny;normals[i+k+2]=nz;}
       }
       Mesh m=new Mesh();m.count=coords.length/9;
+      m.width=max[0]-min[0];m.height=max[1]-min[1];m.depth=max[2]-min[2];
+      m.volumeMm3=Math.abs(signedVolume/6.0);
       ByteBuffer direct=ByteBuffer.allocateDirect(coords.length*4).order(ByteOrder.nativeOrder());
       m.triangles=direct.asFloatBuffer();m.triangles.put(coords);m.triangles.position(0);
       ByteBuffer ndirect=ByteBuffer.allocateDirect(normals.length*4).order(ByteOrder.nativeOrder());
