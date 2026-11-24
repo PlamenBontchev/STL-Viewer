@@ -263,7 +263,7 @@ public final class ModelImporter {
     int n=a.getInt("count");if(n<0||n>2_000_000)throw new IOException("Too many glTF vertices");
     int stride=views.getJSONObject(a.getInt("bufferView")).optInt("byteStride",12);
     ByteBuffer b=accessor(a,views,raw,12);int off=b.position();
-    float[] verts=new float[n*3];for(int i=0;i<n;i++){int at=off+i*stride;for(int j=0;j<3;j++)verts[i*3+j]=b.getFloat(at+j*4);}return verts;
+    float[] verts=new float[n*3];for(int i=0;i<n;i++){int at=off+i*stride;for(int j=0;j<3;j++)verts[i*3+j]=b.getFloat(at+j*4)*1000f;}return verts;
   }
   private static int[] indices(JSONObject a,JSONArray views,ArrayList<byte[]> raw)throws Exception{
     int ct=a.getInt("componentType"),bytes=ct==5121?1:ct==5123?2:ct==5125?4:0;
@@ -280,7 +280,7 @@ public final class ModelImporter {
     Builder out=new Builder();read3ds(b,0,data.length,out,null);
     return out.done();
   }
-  private static void read3ds(ByteBuffer b,int start,int limit,Builder out,ArrayList<float[]> current)throws IOException{
+  private static ArrayList<float[]> read3ds(ByteBuffer b,int start,int limit,Builder out,ArrayList<float[]> current)throws IOException{
     int p=start;
     while(p+6<=limit){
       int tag=Short.toUnsignedInt(b.getShort(p));long length=Integer.toUnsignedLong(b.getInt(p+2));
@@ -288,7 +288,7 @@ public final class ModelImporter {
       int end=(int)(p+length),body=p+6;
       if(tag==0x4d4d||tag==0x3d3d||tag==0x4100||tag==0x4000){
         if(tag==0x4000){while(body<end&&b.get(body)!=0)body++;body++;}
-        if(body<end)read3ds(b,body,end,out,current);
+        if(body<end)current=read3ds(b,body,end,out,current);
       }else if(tag==0x4110){
         int n=Short.toUnsignedInt(b.getShort(body));ArrayList<float[]> v=new ArrayList<>(n);int at=body+2;
         for(int i=0;i<n;i++){if(at+12>end)throw new IOException("Short 3DS vertices");
@@ -304,5 +304,6 @@ public final class ModelImporter {
       }
       p=end;
     }
+    return current;
   }
 }
