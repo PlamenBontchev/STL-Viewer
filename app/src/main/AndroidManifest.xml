@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
   <uses-feature android:glEsVersion="0x00020000" android:required="true"/>
-  <application android:label="STL Check" android:icon="@mipmap/ic_launcher"
+  <application android:label="3D Check" android:icon="@mipmap/ic_launcher"
       android:roundIcon="@mipmap/ic_launcher_round"
       android:theme="@android:style/Theme.Material.NoActionBar"
       android:allowBackup="false">
@@ -21,6 +21,15 @@
         <data android:mimeType="application/sla"/>
         <data android:mimeType="application/vnd.ms-pki.stl"/>
         <data android:mimeType="application/octet-stream"/>
+        <data android:mimeType="model/obj"/>
+        <data android:mimeType="text/plain"/>
+        <data android:mimeType="model/ply"/>
+        <data android:mimeType="model/3mf"/>
+        <data android:mimeType="model/gltf+json"/>
+        <data android:mimeType="model/gltf-binary"/>
+        <data android:mimeType="application/vnd.ms-package.3dmanufacturing-3dmodel+xml"/>
+        <data android:mimeType="application/zip"/>
+        <data android:mimeType="application/x-3ds"/>
       </intent-filter>
       <!-- Accept STL files shared by a file manager using Send/Open with. -->
       <intent-filter>
@@ -30,6 +39,15 @@
         <data android:mimeType="model/x.stl-binary"/>
         <data android:mimeType="application/sla"/>
         <data android:mimeType="application/octet-stream"/>
+        <data android:mimeType="model/obj"/>
+        <data android:mimeType="text/plain"/>
+        <data android:mimeType="model/ply"/>
+        <data android:mimeType="model/3mf"/>
+        <data android:mimeType="model/gltf+json"/>
+        <data android:mimeType="model/gltf-binary"/>
+        <data android:mimeType="application/vnd.ms-package.3dmanufacturing-3dmodel+xml"/>
+        <data android:mimeType="application/zip"/>
+        <data android:mimeType="application/x-3ds"/>
       </intent-filter>
     </activity>
   </application>

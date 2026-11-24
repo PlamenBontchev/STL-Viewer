@@ -1,4 +1,4 @@
-name: Build STL Viewer APK
+name: Build 3D Check APK
 on:
   push:
     branches: [main]
@@ -25,6 +25,6 @@ jobs:
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: STLViewer-APK
+          name: 3D-Check-APK
           path: app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error

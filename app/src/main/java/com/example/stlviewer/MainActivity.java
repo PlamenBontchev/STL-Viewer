@@ -29,13 +29,13 @@ public class MainActivity extends Activity {
   @Override public void onCreate(Bundle b) {
     super.onCreate(b);
     LinearLayout root=new LinearLayout(this);root.setOrientation(1);root.setBackgroundColor(0xff101926);
-    TextView title=new TextView(this);title.setText("STL Check");title.setTextSize(23);title.setTextColor(0xff82e7d2);title.setPadding(20,22,10,8);root.addView(title);
-    details=new TextView(this);details.setText("Open an STL file to view a 3D model");details.setTextColor(Color.WHITE);details.setPadding(20,4,10,16);root.addView(details);
+    TextView title=new TextView(this);title.setText("3D Check");title.setTextSize(23);title.setTextColor(0xff82e7d2);title.setPadding(20,22,10,8);root.addView(title);
+    details=new TextView(this);details.setText("Open STL, OBJ, PLY, OFF, 3MF, GLB, GLTF or 3DS");details.setTextColor(Color.WHITE);details.setPadding(20,4,10,16);root.addView(details);
     renderer=new Viewer();
     view=new GLSurfaceView(this);view.setEGLContextClientVersion(2);view.setRenderer(renderer);view.setRenderMode(GLSurfaceView.RENDERMODE_WHEN_DIRTY);
     root.addView(view,new LinearLayout.LayoutParams(-1,0,1));
     LinearLayout actions=new LinearLayout(this);actions.setGravity(Gravity.CENTER);
-    Button open=new Button(this);open.setText("Open STL");actions.addView(open,new LinearLayout.LayoutParams(0,-2,1));
+    Button open=new Button(this);open.setText("Open 3D");actions.addView(open,new LinearLayout.LayoutParams(0,-2,1));
     Button reset=new Button(this);reset.setText("Reset view");actions.addView(reset,new LinearLayout.LayoutParams(0,-2,1));
     root.addView(actions);setContentView(root);
     handleIncomingIntent(getIntent());
@@ -55,7 +55,7 @@ public class MainActivity extends Activity {
   @Override protected void onActivityResult(int req,int result,Intent data){
     super.onActivityResult(req,result,data);
     if(req==REQUEST && result==RESULT_OK && data!=null && data.getData()!=null)
-      loadStl(data.getData());
+      loadModel(data.getData());
   }
   @Override protected void onNewIntent(Intent intent) {
     super.onNewIntent(intent);
@@ -73,7 +73,7 @@ public class MainActivity extends Activity {
       else
         uri=(Uri)intent.getParcelableExtra(Intent.EXTRA_STREAM);
     }
-    if(uri!=null)loadStl(uri);
+    if(uri!=null)loadModel(uri);
   }
   private String displayName(Uri uri){
     if("content".equalsIgnoreCase(uri.getScheme())){
@@ -85,9 +85,9 @@ public class MainActivity extends Activity {
       }catch(Exception ignored){}
     }
     String last=uri.getLastPathSegment();
-    return last!=null?last:"STL file";
+    return last!=null?last:"3D model";
   }
-  private void loadStl(Uri uri){
+  private void loadModel(Uri uri){
     final int generation=++loadGeneration;
     final String name=displayName(uri);
     details.setText("Loading "+name+"...");
@@ -95,14 +95,14 @@ public class MainActivity extends Activity {
     new Thread(()->{
       try(InputStream in=getContentResolver().openInputStream(uri)){
         if(in==null)throw new IOException("Cannot open file");
-        Mesh m=Mesh.read(in);
+        Mesh m=ModelImporter.open(in,name);
         runOnUiThread(()->{
           if(generation!=loadGeneration || isFinishing())return;
           view.queueEvent(()->renderer.setMesh(m));view.requestRender();
           double cm3=m.volumeMm3/1000.0;
           double meters=m.volumeMm3/(Math.PI*0.875*0.875)/1000.0;
           details.setText(String.format(java.util.Locale.US,
-            "%s  •  %,d triangles\\nSize: %.2f × %.2f × %.2f mm\\nSolid volume: %.3f cm³  |  1.75 mm filament: %.2f m\\nAssumes STL units are mm; closed watertight mesh; 100%% solid",
+            "%s  •  %,d triangles\\nSize: %.2f × %.2f × %.2f mm\\nEnclosed volume (if watertight): %.3f cm³\\n1.75 mm filament @100%% solid: %.2f m",
             name,m.count,m.width,m.height,m.depth,cm3,meters));
         });
       }catch(Exception ex){runOnUiThread(()->{
