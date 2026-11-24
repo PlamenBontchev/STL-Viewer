@@ -12,6 +12,8 @@ import android.view.ScaleGestureDetector;
 import android.widget.*;
 import android.view.Gravity;
 import android.graphics.Color;
+import android.database.Cursor;
+import android.provider.OpenableColumns;
 import java.io.*;
 import java.nio.*;
 import java.util.*;
@@ -23,6 +25,7 @@ public class MainActivity extends Activity {
   TextView details;
   ScaleGestureDetector pinch;
   float lastX,lastY;
+  private int loadGeneration = 0;
   @Override public void onCreate(Bundle b) {
     super.onCreate(b);
     LinearLayout root=new LinearLayout(this);root.setOrientation(1);root.setBackgroundColor(0xff101926);
@@ -35,6 +38,7 @@ public class MainActivity extends Activity {
     Button open=new Button(this);open.setText("Open STL");actions.addView(open,new LinearLayout.LayoutParams(0,-2,1));
     Button reset=new Button(this);reset.setText("Reset view");actions.addView(reset,new LinearLayout.LayoutParams(0,-2,1));
     root.addView(actions);setContentView(root);
+    handleIncomingIntent(getIntent());
     open.setOnClickListener(v->{Intent i=new Intent(Intent.ACTION_OPEN_DOCUMENT);i.addCategory(Intent.CATEGORY_OPENABLE);i.setType("*/*");startActivityForResult(i,REQUEST);});
     reset.setOnClickListener(v->{view.queueEvent(()->renderer.reset());view.requestRender();});
     pinch=new ScaleGestureDetector(this,new ScaleGestureDetector.SimpleOnScaleGestureListener(){
@@ -50,23 +54,61 @@ public class MainActivity extends Activity {
   }
   @Override protected void onActivityResult(int req,int result,Intent data){
     super.onActivityResult(req,result,data);
-    if(req!=REQUEST||result!=RESULT_OK||data==null)return;
-    Uri uri=data.getData();if(uri==null)return;
-    details.setText("Loading STL...");
+    if(req==REQUEST && result==RESULT_OK && data!=null && data.getData()!=null)
+      loadStl(data.getData());
+  }
+  @Override protected void onNewIntent(Intent intent) {
+    super.onNewIntent(intent);
+    setIntent(intent);
+    handleIncomingIntent(intent);
+  }
+  private void handleIncomingIntent(Intent intent){
+    if(intent==null)return;
+    String action=intent.getAction();
+    Uri uri=null;
+    if(Intent.ACTION_VIEW.equals(action))uri=intent.getData();
+    else if(Intent.ACTION_SEND.equals(action)) {
+      if(android.os.Build.VERSION.SDK_INT >= 33)
+        uri=intent.getParcelableExtra(Intent.EXTRA_STREAM,Uri.class);
+      else
+        uri=(Uri)intent.getParcelableExtra(Intent.EXTRA_STREAM);
+    }
+    if(uri!=null)loadStl(uri);
+  }
+  private String displayName(Uri uri){
+    if("content".equalsIgnoreCase(uri.getScheme())){
+      try(Cursor cursor=getContentResolver().query(uri,new String[]{OpenableColumns.DISPLAY_NAME},null,null,null)){
+        if(cursor!=null && cursor.moveToFirst()){
+          String value=cursor.getString(0);
+          if(value!=null && !value.isEmpty())return value;
+        }
+      }catch(Exception ignored){}
+    }
+    String last=uri.getLastPathSegment();
+    return last!=null?last:"STL file";
+  }
+  private void loadStl(Uri uri){
+    final int generation=++loadGeneration;
+    final String name=displayName(uri);
+    details.setText("Loading "+name+"...");
+    // The URI permission is granted by the file manager as part of the opening intent.
     new Thread(()->{
       try(InputStream in=getContentResolver().openInputStream(uri)){
         if(in==null)throw new IOException("Cannot open file");
         Mesh m=Mesh.read(in);
-        view.queueEvent(()->renderer.setMesh(m));view.requestRender();
         runOnUiThread(()->{
+          if(generation!=loadGeneration || isFinishing())return;
+          view.queueEvent(()->renderer.setMesh(m));view.requestRender();
           double cm3=m.volumeMm3/1000.0;
           double meters=m.volumeMm3/(Math.PI*0.875*0.875)/1000.0;
           details.setText(String.format(java.util.Locale.US,
-            "%s  •  %,d triangles\nSize: %.2f × %.2f × %.2f mm\nSolid volume: %.3f cm³  |  1.75 mm filament: %.2f m\nAssumes STL units are mm; closed watertight mesh; 100%% solid",
-            uri.getLastPathSegment(),m.count,m.width,m.height,m.depth,cm3,meters));
+            "%s  •  %,d triangles\\nSize: %.2f × %.2f × %.2f mm\\nSolid volume: %.3f cm³  |  1.75 mm filament: %.2f m\\nAssumes STL units are mm; closed watertight mesh; 100%% solid",
+            name,m.count,m.width,m.height,m.depth,cm3,meters));
         });
-      }catch(Exception ex){runOnUiThread(()->details.setText("Error: "+ex.getMessage()));}
-    }).start();
+      }catch(Exception ex){runOnUiThread(()->{
+        if(generation==loadGeneration)details.setText("Couldn't open "+name+": "+ex.getMessage());
+      });}
+    },"STL-Loader").start();
   }
   @Override public void onResume(){super.onResume();if(view!=null)view.onResume();}
   @Override public void onPause(){if(view!=null)view.onPause();super.onPause();}
